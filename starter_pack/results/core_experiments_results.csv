@@ -1,0 +1,7 @@
+dataset,model,test_accuracy,test_cross_entropy
+gaussian,softmax,0.95,0.15386857076142077
+gaussian,nn_width32_sgd,0.95,0.15549477930141734
+moons,softmax,0.85,0.28517092253566545
+moons,nn_width32_sgd,0.85,0.269472815023238
+digits,softmax,0.9402173913043478,0.26957756250772946
+digits,nn_width32_sgd,0.9402173913043478,0.1933288376601526
