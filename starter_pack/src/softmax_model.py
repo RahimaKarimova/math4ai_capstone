@@ -35,3 +35,47 @@ def init_softmax_params(
     W = 0.01 * gen.standard_normal((k, d))
     b = np.zeros(k, dtype=np.float64)
     return W, b
+
+
+def stable_softmax(logits: np.ndarray) -> np.ndarray:
+    """
+    Row-wise numerically stable softmax.
+
+    For each row, computes softmax(logits) via subtracting the row maximum
+    before ``exp`` to reduce overflow risk.
+
+    Parameters
+    ----------
+    logits : np.ndarray
+        Shape (n, k) class scores, or shape (k,) for a single sample (treated
+        as one row).
+
+    Returns
+    -------
+    np.ndarray
+        Same shape as input; each row sums to 1 (within ``1e-6``).
+    """
+    x = np.asarray(logits, dtype=np.float64)
+    single = x.ndim == 1
+    if single:
+        x = x.reshape(1, -1)
+
+    m = np.max(x, axis=1, keepdims=True)
+    shifted = x - m
+    exp_s = np.exp(shifted)
+    denom = np.sum(exp_s, axis=1, keepdims=True)
+    out = exp_s / denom
+
+    row_sums = np.sum(out, axis=1)
+    if not np.allclose(row_sums, 1.0, atol=1e-6, rtol=0.0):
+        raise AssertionError("stable_softmax: row sums not ~1 within 1e-6.")
+
+    return out.reshape(-1) if single else out
+
+
+if __name__ == "__main__":
+    # Section 3.6 sanity check (Story 3.2 action item)
+    example = np.array([1.2, 0.2, -0.4], dtype=np.float64)
+    p = stable_softmax(example)
+    expected = np.array([0.64, 0.23, 0.13], dtype=np.float64)
+    assert np.allclose(p, expected, atol=0.02), (p, expected)
