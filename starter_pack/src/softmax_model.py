@@ -1,4 +1,4 @@
-"""Multiclass softmax regression: init, stable softmax, cross-entropy + L2 loss (Stories 3.1–3.3)."""
+"""Multiclass softmax regression: init, softmax, loss, vectorized forward (Stories 3.1–3.4)."""
 
 from __future__ import annotations
 
@@ -129,6 +129,38 @@ def softmax_loss(
     return mean_cross_entropy(probs, labels) + l2_weight_penalty(W, l2_lambda)
 
 
+def predict_proba(X: np.ndarray, W: np.ndarray, b: np.ndarray) -> np.ndarray:
+    """
+    Vectorized forward pass: class probabilities for a batch.
+
+    Computes scores ``S = X W^T + \\mathbf{1} b^T`` with ``X`` of shape
+    ``(n, d)``, ``W`` of shape ``(k, d)``, ``b`` of shape ``(k,)``, then
+    applies :func:`stable_softmax` row-wise to obtain ``P`` of shape
+    ``(n, k)``.
+
+    A single sample may be passed as ``X`` with shape ``(d,)``; the return
+    shape is then ``(k,)``.
+    """
+    Xm = np.asarray(X, dtype=np.float64)
+    Wm = np.asarray(W, dtype=np.float64)
+    bm = np.asarray(b, dtype=np.float64)
+
+    single = Xm.ndim == 1
+    if single:
+        Xm = Xm.reshape(1, -1)
+
+    n, d = Xm.shape
+    k, d_w = Wm.shape
+    if d != d_w:
+        raise ValueError(f"X has {d} features but W has {d_w} columns.")
+    if bm.shape != (k,):
+        raise ValueError(f"Expected b of shape ({k},), got {bm.shape}.")
+
+    S = Xm @ Wm.T + bm
+    P = stable_softmax(S)
+    return P.reshape(-1) if single else P
+
+
 if __name__ == "__main__":
     # Section 3.6 sanity check (Story 3.2 action item)
     example = np.array([1.2, 0.2, -0.4], dtype=np.float64)
@@ -145,3 +177,14 @@ if __name__ == "__main__":
     W_ones = np.ones((2, 3), dtype=np.float64)
     pen = l2_weight_penalty(W_ones, l2_lambda=2.0)
     assert np.isclose(pen, 6.0), pen
+
+    # Story 3.4: S = X W^T + 1 b^T, then stable softmax; predict_proba API
+    W_i = np.eye(3, dtype=np.float64)
+    b_z = np.zeros(3, dtype=np.float64)
+    X_batch = np.tile(example.reshape(1, -1), (2, 1))
+    P_batch = predict_proba(X_batch, W_i, b_z)
+    assert P_batch.shape == (2, 3)
+    assert np.allclose(P_batch[0], P_batch[1])
+    assert np.allclose(P_batch[0], p)
+    P_one = predict_proba(example, W_i, b_z)
+    assert P_one.shape == (3,) and np.allclose(P_one, p)
