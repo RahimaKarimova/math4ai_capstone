@@ -1,0 +1,338 @@
+"""Multiclass softmax regression: init through training loop (Stories 3.1–3.6)."""
+
+from __future__ import annotations
+
+from typing import Dict, List, Optional, Tuple
+
+import numpy as np
+
+from metrics import dataset_softmax_loss, one_hot
+
+
+def init_softmax_params(
+    num_classes: int,
+    input_dim: int,
+    rng: Optional[np.random.Generator] = None,
+) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    Initialize weight matrix W and bias vector b for softmax regression.
+
+    - W has shape (k, d) with entries drawn i.i.d. from N(0, 1), scaled by 0.01.
+    - b has shape (k,) and is all zeros.
+
+    Parameters
+    ----------
+    num_classes : int
+        k, number of classes (rows of W).
+    input_dim : int
+        d, feature dimension (columns of W).
+    rng : np.random.Generator, optional
+        Random number generator for reproducible W. If None, uses ``default_rng()``.
+    """
+    if num_classes < 1 or input_dim < 1:
+        raise ValueError("num_classes and input_dim must be positive integers.")
+
+    k, d = num_classes, input_dim
+    gen = rng if rng is not None else np.random.default_rng()
+    W = 0.01 * gen.standard_normal((k, d))
+    b = np.zeros(k, dtype=np.float64)
+    return W, b
+
+
+def stable_softmax(logits: np.ndarray) -> np.ndarray:
+    """
+    Row-wise numerically stable softmax.
+
+    For each row, computes softmax(logits) via subtracting the row maximum
+    before ``exp`` to reduce overflow risk.
+
+    Parameters
+    ----------
+    logits : np.ndarray
+        Shape (n, k) class scores, or shape (k,) for a single sample (treated
+        as one row).
+
+    Returns
+    -------
+    np.ndarray
+        Same shape as input; each row sums to 1 (within ``1e-6``).
+    """
+    x = np.asarray(logits, dtype=np.float64)
+    single = x.ndim == 1
+    if single:
+        x = x.reshape(1, -1)
+
+    m = np.max(x, axis=1, keepdims=True)
+    shifted = x - m
+    exp_s = np.exp(shifted)
+    denom = np.sum(exp_s, axis=1, keepdims=True)
+    out = exp_s / denom
+
+    row_sums = np.sum(out, axis=1)
+    if not np.allclose(row_sums, 1.0, atol=1e-6, rtol=0.0):
+        raise AssertionError("stable_softmax: row sums not ~1 within 1e-6.")
+
+    return out.reshape(-1) if single else out
+
+
+def mean_cross_entropy(probs: np.ndarray, labels: np.ndarray) -> float:
+    """
+    Mean cross-entropy: average over the batch of ``-log p_y``,
+    where ``p_y`` is the predicted probability of the true class.
+
+    Parameters
+    ----------
+    probs : np.ndarray
+        Softmax probabilities, shape (n, k) or (k,) for a single example.
+    labels : np.ndarray
+        True class indices in ``{0, ..., k-1}``, shape (n,) or scalar.
+    """
+    P = np.asarray(probs, dtype=np.float64)
+    y = np.asarray(labels, dtype=np.intp)
+
+    if P.ndim == 1:
+        P = P.reshape(1, -1)
+    if y.ndim == 0:
+        y = y.reshape(1)
+    if y.ndim != 1 or P.shape[0] != y.shape[0]:
+        raise ValueError("labels must be 1-D with length matching number of rows in probs.")
+
+    n, k = P.shape
+    if np.any((y < 0) | (y >= k)):
+        raise ValueError("labels must be in [0, k) for k classes.")
+
+    idx = np.arange(n)
+    p_y = P[idx, y]
+    p_y = np.clip(p_y, 1e-15, 1.0)
+    return float(np.mean(-np.log(p_y)))
+
+
+def l2_weight_penalty(W: np.ndarray, l2_lambda: float) -> float:
+    """
+    L2 regularization term ``(λ/2) * ||W||_F^2`` (Frobenius norm squared).
+    Applied to weights ``W`` only, not bias.
+    """
+    if l2_lambda == 0.0:
+        return 0.0
+    Wm = np.asarray(W, dtype=np.float64)
+    return 0.5 * float(l2_lambda) * float(np.sum(Wm * Wm))
+
+
+def softmax_loss(
+    logits: np.ndarray,
+    labels: np.ndarray,
+    W: np.ndarray,
+    l2_lambda: float = 0.0,
+) -> float:
+    """
+    Full training loss: mean cross-entropy on softmax(logits) plus optional L2 on ``W``.
+    """
+    probs = stable_softmax(logits)
+    return mean_cross_entropy(probs, labels) + l2_weight_penalty(W, l2_lambda)
+
+
+def predict_proba(X: np.ndarray, W: np.ndarray, b: np.ndarray) -> np.ndarray:
+    """
+    Vectorized forward pass: class probabilities for a batch.
+
+    Computes scores ``S = X W^T + \\mathbf{1} b^T`` with ``X`` of shape
+    ``(n, d)``, ``W`` of shape ``(k, d)``, ``b`` of shape ``(k,)``, then
+    applies :func:`stable_softmax` row-wise to obtain ``P`` of shape
+    ``(n, k)``.
+
+    A single sample may be passed as ``X`` with shape ``(d,)``; the return
+    shape is then ``(k,)``.
+    """
+    Xm = np.asarray(X, dtype=np.float64)
+    Wm = np.asarray(W, dtype=np.float64)
+    bm = np.asarray(b, dtype=np.float64)
+
+    single = Xm.ndim == 1
+    if single:
+        Xm = Xm.reshape(1, -1)
+
+    n, d = Xm.shape
+    k, d_w = Wm.shape
+    if d != d_w:
+        raise ValueError(f"X has {d} features but W has {d_w} columns.")
+    if bm.shape != (k,):
+        raise ValueError(f"Expected b of shape ({k},), got {bm.shape}.")
+
+    S = Xm @ Wm.T + bm
+    P = stable_softmax(S)
+    return P.reshape(-1) if single else P
+
+
+def compute_gradients(
+    X: np.ndarray,
+    y: np.ndarray,
+    W: np.ndarray,
+    b: np.ndarray,
+    l2_lambda: float = 0.0,
+) -> Dict[str, np.ndarray]:
+    """
+    Gradients of mean cross-entropy + ``(λ/2)||W||_F^2`` w.r.t. ``W`` and ``b``.
+
+    With logits ``S = X W^T + \\mathbf{1} b^T``, probabilities ``P = \\mathrm{softmax}(S)``
+    (row-wise), and one-hot targets ``Y`` from :func:`metrics.one_hot`:
+
+    - ``∂L/∂S = (P - Y) / n``
+    - ``∂L/∂W = (∂L/∂S)^T X + λ W``
+    - ``∂L/∂b = (∂L/∂S)^T \\mathbf{1}``
+
+    The L2 term matches :func:`l2_weight_penalty` (derivative ``λ W``, not ``2λ W``).
+    """
+    Xm = np.asarray(X, dtype=np.float64)
+    if Xm.ndim == 1:
+        Xm = Xm.reshape(1, -1)
+    ym = np.asarray(y, dtype=np.intp).ravel()
+    Wm = np.asarray(W, dtype=np.float64)
+    bm = np.asarray(b, dtype=np.float64)
+
+    n, d = Xm.shape
+    k, d_w = Wm.shape
+    if ym.shape[0] != n:
+        raise ValueError("X and y must have the same number of rows / samples.")
+    if d != d_w:
+        raise ValueError(f"X has {d} features but W has {d_w} columns.")
+    if bm.shape != (k,):
+        raise ValueError(f"Expected b of shape ({k},), got {bm.shape}.")
+
+    S = Xm @ Wm.T + bm
+    P = stable_softmax(S)
+    Y = one_hot(ym, k)
+
+    dL_dS = (P - Y) / float(n)
+    dW = dL_dS.T @ Xm + float(l2_lambda) * Wm
+    db = dL_dS.T @ np.ones(n, dtype=np.float64)
+    return {"W": dW, "b": db}
+
+
+def train(
+    X_train: np.ndarray,
+    y_train: np.ndarray,
+    X_val: np.ndarray,
+    y_val: np.ndarray,
+    W: np.ndarray,
+    b: np.ndarray,
+    l2_lambda: float = 0.0,
+    learning_rate: float = 0.05,
+    batch_size: int = 64,
+    epochs: int = 200,
+    rng: Optional[np.random.Generator] = None,
+) -> Tuple[List[float], List[float]]:
+    """
+    Mini-batch SGD training: ``θ ← θ - 0.05 ∇θ`` (default lr) on ``W`` and ``b``.
+
+    Each epoch shuffles the training set, uses batches of size 64 (last batch may
+    be smaller), then records full train/validation loss via
+    :func:`metrics.dataset_softmax_loss`. Keeps the best validation snapshot of
+    ``W``, ``b``; after ``epochs`` (default 200) restores those parameters in
+    place and returns ``(train_loss_history, val_loss_history)``.
+    """
+    Xm = np.asarray(X_train, dtype=np.float64)
+    if Xm.ndim == 1:
+        Xm = Xm.reshape(1, -1)
+    ym = np.asarray(y_train, dtype=np.intp).ravel()
+
+    Wm = np.asarray(W, dtype=np.float64)
+    bm = np.asarray(b, dtype=np.float64)
+    if not Wm.flags.writeable or not bm.flags.writeable:
+        raise ValueError("W and b must be writeable arrays.")
+
+    gen = rng if rng is not None else np.random.default_rng()
+    n = Xm.shape[0]
+
+    train_hist: List[float] = []
+    val_hist: List[float] = []
+    best_val = float("inf")
+    W_best = Wm.copy()
+    b_best = bm.copy()
+
+    for _ in range(epochs):
+        order = gen.permutation(n)
+        for start in range(0, n, batch_size):
+            idx = order[start : start + batch_size]
+            Xb = Xm[idx]
+            yb = ym[idx]
+            g = compute_gradients(Xb, yb, Wm, bm, l2_lambda)
+            Wm -= learning_rate * g["W"]
+            bm -= learning_rate * g["b"]
+
+        tr = dataset_softmax_loss(Xm, ym, Wm, bm, l2_lambda)
+        va = dataset_softmax_loss(X_val, y_val, Wm, bm, l2_lambda)
+        train_hist.append(tr)
+        val_hist.append(va)
+
+        if va < best_val:
+            best_val = va
+            W_best = Wm.copy()
+            b_best = bm.copy()
+
+    np.copyto(Wm, W_best)
+    np.copyto(bm, b_best)
+
+    return train_hist, val_hist
+
+
+if __name__ == "__main__":
+    # Section 3.6 sanity check (Story 3.2 action item)
+    example = np.array([1.2, 0.2, -0.4], dtype=np.float64)
+    p = stable_softmax(example)
+    expected = np.array([0.64, 0.23, 0.13], dtype=np.float64)
+    assert np.allclose(p, expected, atol=0.02), (p, expected)
+
+    # Section 3.6 loss, true class 0, no L2 (Story 3.3 action item)
+    W_dummy = np.zeros((3, 1), dtype=np.float64)
+    loss_36 = softmax_loss(example, 0, W_dummy, l2_lambda=0.0)
+    assert np.isclose(loss_36, 0.45, atol=0.02), loss_36
+
+    # L2: (λ/2) * ||W||_F^2 only on W
+    W_ones = np.ones((2, 3), dtype=np.float64)
+    pen = l2_weight_penalty(W_ones, l2_lambda=2.0)
+    assert np.isclose(pen, 6.0), pen
+
+    # Story 3.4: S = X W^T + 1 b^T, then stable softmax; predict_proba API
+    W_i = np.eye(3, dtype=np.float64)
+    b_z = np.zeros(3, dtype=np.float64)
+    X_batch = np.tile(example.reshape(1, -1), (2, 1))
+    P_batch = predict_proba(X_batch, W_i, b_z)
+    assert P_batch.shape == (2, 3)
+    assert np.allclose(P_batch[0], P_batch[1])
+    assert np.allclose(P_batch[0], p)
+    P_one = predict_proba(example, W_i, b_z)
+    assert P_one.shape == (3,) and np.allclose(P_one, p)
+
+    # Story 3.5: gradients via one-hot Y from metrics.py
+    rng = np.random.default_rng(0)
+    Xg = rng.standard_normal((4, 2))
+    Wg = rng.standard_normal((3, 2)) * 0.1
+    bg = rng.standard_normal(3) * 0.1
+    yg = np.array([0, 1, 2, 1], dtype=np.intp)
+    g0 = compute_gradients(Xg, yg, Wg, bg, l2_lambda=0.0)
+    assert g0["W"].shape == Wg.shape and g0["b"].shape == bg.shape
+    gl2 = compute_gradients(Xg, yg, Wg, bg, l2_lambda=0.5)
+    assert np.allclose(gl2["W"], g0["W"] + 0.5 * Wg)
+    assert np.allclose(gl2["b"], g0["b"])
+
+    # Story 3.6: short smoke test (not full 200 epochs)
+    Xt = rng.standard_normal((80, 2))
+    yt = rng.integers(0, 3, size=80, dtype=np.intp)
+    Xv = rng.standard_normal((24, 2))
+    yv = rng.integers(0, 3, size=24, dtype=np.intp)
+    Wt, bt = init_softmax_params(3, 2, rng=rng)
+    tr_h, va_h = train(
+        Xt,
+        yt,
+        Xv,
+        yv,
+        Wt,
+        bt,
+        l2_lambda=0.0,
+        learning_rate=0.05,
+        batch_size=64,
+        epochs=3,
+        rng=rng,
+    )
+    assert len(tr_h) == len(va_h) == 3
+    assert Wt.shape == (3, 2) and bt.shape == (3,)
