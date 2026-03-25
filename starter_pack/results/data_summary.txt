@@ -1,0 +1,29 @@
+Data Summary for Report
+=======================
+
+Digits Benchmark
+  d = 64          (input dimension, flattened 8x8 pixel images)
+  k = 10          (number of classes, digits 0-9)
+  n_total = 1797
+  n_train = 1074
+  n_val   = 355
+  n_test  = 368
+  Feature range: [0, 1] (pre-scaled by 1/16)
+
+  Per-class counts:
+    Class | Train | Val | Test | Total
+    ------+-------+-----+------+------
+      0   |  106  |  35 |  37  |  178
+      1   |  109  |  36 |  37  |  182
+      2   |  106  |  35 |  36  |  177
+      3   |  109  |  36 |  38  |  183
+      4   |  108  |  36 |  37  |  181
+      5   |  109  |  36 |  37  |  182
+      6   |  108  |  36 |  37  |  181
+      7   |  107  |  35 |  37  |  179
+      8   |  104  |  34 |  36  |  174
+      9   |  108  |  36 |  36  |  180
+
+Synthetic Datasets (both 2D, binary, balanced)
+  Linear Gaussian:  n_train=240, n_val=80, n_test=80  (total 400)
+  Moons:            n_train=240, n_val=80, n_test=80  (total 400)
