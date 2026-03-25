@@ -75,13 +75,17 @@ class OneHiddenLayerNN:
         """Return mutable parameter arrays in a fixed order."""
         return [self.W1, self.b1, self.W2, self.b2]
 
-    def _cross_entropy_with_l2(self, X: ArrayLike, y: ArrayLike) -> float:
-        """Average cross-entropy plus L2 penalty on weights only."""
+    def _mean_cross_entropy(self, X: ArrayLike, y: ArrayLike) -> float:
+        """Average cross-entropy only (no regularization)."""
         probs = self.predict_proba(X)
         n = len(y)
         correct_probs = probs[np.arange(n), y]
-        ce = -np.mean(np.log(np.clip(correct_probs, 1e-12, None)))
-        l2_penalty = self.l2_lambda * (
+        return float(-np.mean(np.log(np.clip(correct_probs, 1e-12, None))))
+
+    def _cross_entropy_with_l2(self, X: ArrayLike, y: ArrayLike) -> float:
+        """Average cross-entropy plus (λ/2)||W||² on weights (same scaling as softmax)."""
+        ce = self._mean_cross_entropy(X, y)
+        l2_penalty = 0.5 * self.l2_lambda * (
             np.sum(self.W1 * self.W1) + np.sum(self.W2 * self.W2)
         )
         return float(ce + l2_penalty)
@@ -107,8 +111,8 @@ class OneHiddenLayerNN:
         if dS.shape != (n, self.num_classes):
             raise RuntimeError("dS has invalid shape.")
 
-        # dW2 = dS^T H + 2 * lambda * W2
-        dW2 = dS.T @ H + (2.0 * self.l2_lambda * self.W2)
+        # dW2 = dS^T H + lambda * W2  (L2 term is (lambda/2)||W||^2)
+        dW2 = dS.T @ H + (self.l2_lambda * self.W2)
         if dW2.shape != (self.num_classes, self.hidden_width):
             raise RuntimeError("dW2 has invalid shape.")
 
@@ -122,8 +126,8 @@ class OneHiddenLayerNN:
         if dZ1.shape != (n, self.hidden_width):
             raise RuntimeError("dZ1 has invalid shape.")
 
-        # dW1 = dZ1^T X + 2 * lambda * W1
-        dW1 = dZ1.T @ X + (2.0 * self.l2_lambda * self.W1)
+        # dW1 = dZ1^T X + lambda * W1
+        dW1 = dZ1.T @ X + (self.l2_lambda * self.W1)
         if dW1.shape != (self.hidden_width, self.input_dim):
             raise RuntimeError("dW1 has invalid shape.")
 
@@ -151,7 +155,12 @@ class OneHiddenLayerNN:
         batch_size: int = 64,
         seed: int = 0,
     ):
-        """Train end-to-end and return (train_loss_history, val_loss_history)."""
+        """Train end-to-end and return (train_loss_history, val_loss_history).
+
+        Training loss each epoch is CE + (λ/2)||W||². Validation logging and
+        best-checkpoint selection use **validation cross-entropy only**, per the
+        capstone protocol.
+        """
         if epochs <= 0:
             raise ValueError("epochs must be positive.")
         if batch_size <= 0:
@@ -192,7 +201,7 @@ class OneHiddenLayerNN:
                 opt.step(self.parameters(), grad_list)
 
             train_loss = self._cross_entropy_with_l2(X_train, y_train)
-            val_loss = self._cross_entropy_with_l2(X_val, y_val)
+            val_loss = self._mean_cross_entropy(X_val, y_val)
             train_loss_history.append(train_loss)
             val_loss_history.append(val_loss)
 

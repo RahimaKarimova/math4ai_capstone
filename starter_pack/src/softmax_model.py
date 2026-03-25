@@ -225,10 +225,11 @@ def train(
     Mini-batch SGD training: ``θ ← θ - 0.05 ∇θ`` (default lr) on ``W`` and ``b``.
 
     Each epoch shuffles the training set, uses batches of size 64 (last batch may
-    be smaller), then records full train/validation loss via
-    :func:`metrics.dataset_softmax_loss`. Keeps the best validation snapshot of
-    ``W``, ``b``; after ``epochs`` (default 200) restores those parameters in
-    place and returns ``(train_loss_history, val_loss_history)``.
+    be smaller), then records training loss (CE + L2) and **validation
+    cross-entropy only** (no L2) each epoch — matching the handout: validation
+    CE is the metric for checkpoint selection. Keeps the best validation-CE
+    snapshot of ``W``, ``b``; after ``epochs`` (default 200) restores those
+    parameters in place and returns ``(train_loss_history, val_loss_history)``.
     """
     Xm = np.asarray(X_train, dtype=np.float64)
     if Xm.ndim == 1:
@@ -260,7 +261,8 @@ def train(
             bm -= learning_rate * g["b"]
 
         tr = dataset_softmax_loss(Xm, ym, Wm, bm, l2_lambda)
-        va = dataset_softmax_loss(X_val, y_val, Wm, bm, l2_lambda)
+        # Validation CE only for logging and best-epoch selection (not CE + L2).
+        va = dataset_softmax_loss(X_val, y_val, Wm, bm, l2_lambda=0.0)
         train_hist.append(tr)
         val_hist.append(va)
 
