@@ -1,4 +1,4 @@
-"""Multiclass softmax regression — parameter initialization (Story 3.1)."""
+"""Multiclass softmax regression: init, stable softmax, cross-entropy + L2 loss (Stories 3.1–3.3)."""
 
 from __future__ import annotations
 
@@ -73,9 +73,75 @@ def stable_softmax(logits: np.ndarray) -> np.ndarray:
     return out.reshape(-1) if single else out
 
 
+def mean_cross_entropy(probs: np.ndarray, labels: np.ndarray) -> float:
+    """
+    Mean cross-entropy: average over the batch of ``-log p_y``,
+    where ``p_y`` is the predicted probability of the true class.
+
+    Parameters
+    ----------
+    probs : np.ndarray
+        Softmax probabilities, shape (n, k) or (k,) for a single example.
+    labels : np.ndarray
+        True class indices in ``{0, ..., k-1}``, shape (n,) or scalar.
+    """
+    P = np.asarray(probs, dtype=np.float64)
+    y = np.asarray(labels, dtype=np.intp)
+
+    if P.ndim == 1:
+        P = P.reshape(1, -1)
+    if y.ndim == 0:
+        y = y.reshape(1)
+    if y.ndim != 1 or P.shape[0] != y.shape[0]:
+        raise ValueError("labels must be 1-D with length matching number of rows in probs.")
+
+    n, k = P.shape
+    if np.any((y < 0) | (y >= k)):
+        raise ValueError("labels must be in [0, k) for k classes.")
+
+    idx = np.arange(n)
+    p_y = P[idx, y]
+    p_y = np.clip(p_y, 1e-15, 1.0)
+    return float(np.mean(-np.log(p_y)))
+
+
+def l2_weight_penalty(W: np.ndarray, l2_lambda: float) -> float:
+    """
+    L2 regularization term ``(λ/2) * ||W||_F^2`` (Frobenius norm squared).
+    Applied to weights ``W`` only, not bias.
+    """
+    if l2_lambda == 0.0:
+        return 0.0
+    Wm = np.asarray(W, dtype=np.float64)
+    return 0.5 * float(l2_lambda) * float(np.sum(Wm * Wm))
+
+
+def softmax_loss(
+    logits: np.ndarray,
+    labels: np.ndarray,
+    W: np.ndarray,
+    l2_lambda: float = 0.0,
+) -> float:
+    """
+    Full training loss: mean cross-entropy on softmax(logits) plus optional L2 on ``W``.
+    """
+    probs = stable_softmax(logits)
+    return mean_cross_entropy(probs, labels) + l2_weight_penalty(W, l2_lambda)
+
+
 if __name__ == "__main__":
     # Section 3.6 sanity check (Story 3.2 action item)
     example = np.array([1.2, 0.2, -0.4], dtype=np.float64)
     p = stable_softmax(example)
     expected = np.array([0.64, 0.23, 0.13], dtype=np.float64)
     assert np.allclose(p, expected, atol=0.02), (p, expected)
+
+    # Section 3.6 loss, true class 0, no L2 (Story 3.3 action item)
+    W_dummy = np.zeros((3, 1), dtype=np.float64)
+    loss_36 = softmax_loss(example, 0, W_dummy, l2_lambda=0.0)
+    assert np.isclose(loss_36, 0.45, atol=0.02), loss_36
+
+    # L2: (λ/2) * ||W||_F^2 only on W
+    W_ones = np.ones((2, 3), dtype=np.float64)
+    pen = l2_weight_penalty(W_ones, l2_lambda=2.0)
+    assert np.isclose(pen, 6.0), pen
