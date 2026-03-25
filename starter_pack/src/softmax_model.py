@@ -1,12 +1,12 @@
-"""Multiclass softmax regression: init through gradients (Stories 3.1–3.5)."""
+"""Multiclass softmax regression: init through training loop (Stories 3.1–3.6)."""
 
 from __future__ import annotations
 
-from typing import Dict, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 
-from metrics import one_hot
+from metrics import dataset_softmax_loss, one_hot
 
 
 def init_softmax_params(
@@ -208,6 +208,73 @@ def compute_gradients(
     return {"W": dW, "b": db}
 
 
+def train(
+    X_train: np.ndarray,
+    y_train: np.ndarray,
+    X_val: np.ndarray,
+    y_val: np.ndarray,
+    W: np.ndarray,
+    b: np.ndarray,
+    l2_lambda: float = 0.0,
+    learning_rate: float = 0.05,
+    batch_size: int = 64,
+    epochs: int = 200,
+    rng: Optional[np.random.Generator] = None,
+) -> Tuple[List[float], List[float]]:
+    """
+    Mini-batch SGD training: ``θ ← θ - 0.05 ∇θ`` (default lr) on ``W`` and ``b``.
+
+    Each epoch shuffles the training set, uses batches of size 64 (last batch may
+    be smaller), then records full train/validation loss via
+    :func:`metrics.dataset_softmax_loss`. Keeps the best validation snapshot of
+    ``W``, ``b``; after ``epochs`` (default 200) restores those parameters in
+    place and returns ``(train_loss_history, val_loss_history)``.
+    """
+    Xm = np.asarray(X_train, dtype=np.float64)
+    if Xm.ndim == 1:
+        Xm = Xm.reshape(1, -1)
+    ym = np.asarray(y_train, dtype=np.intp).ravel()
+
+    Wm = np.asarray(W, dtype=np.float64)
+    bm = np.asarray(b, dtype=np.float64)
+    if not Wm.flags.writeable or not bm.flags.writeable:
+        raise ValueError("W and b must be writeable arrays.")
+
+    gen = rng if rng is not None else np.random.default_rng()
+    n = Xm.shape[0]
+
+    train_hist: List[float] = []
+    val_hist: List[float] = []
+    best_val = float("inf")
+    W_best = Wm.copy()
+    b_best = bm.copy()
+
+    for _ in range(epochs):
+        order = gen.permutation(n)
+        for start in range(0, n, batch_size):
+            idx = order[start : start + batch_size]
+            Xb = Xm[idx]
+            yb = ym[idx]
+            g = compute_gradients(Xb, yb, Wm, bm, l2_lambda)
+            Wm -= learning_rate * g["W"]
+            bm -= learning_rate * g["b"]
+
+        tr = dataset_softmax_loss(Xm, ym, Wm, bm, l2_lambda)
+        va = dataset_softmax_loss(X_val, y_val, Wm, bm, l2_lambda)
+        train_hist.append(tr)
+        val_hist.append(va)
+
+        if va < best_val:
+            best_val = va
+            W_best = Wm.copy()
+            b_best = bm.copy()
+
+    np.copyto(Wm, W_best)
+    np.copyto(bm, b_best)
+
+    return train_hist, val_hist
+
+
 if __name__ == "__main__":
     # Section 3.6 sanity check (Story 3.2 action item)
     example = np.array([1.2, 0.2, -0.4], dtype=np.float64)
@@ -247,3 +314,25 @@ if __name__ == "__main__":
     gl2 = compute_gradients(Xg, yg, Wg, bg, l2_lambda=0.5)
     assert np.allclose(gl2["W"], g0["W"] + 0.5 * Wg)
     assert np.allclose(gl2["b"], g0["b"])
+
+    # Story 3.6: short smoke test (not full 200 epochs)
+    Xt = rng.standard_normal((80, 2))
+    yt = rng.integers(0, 3, size=80, dtype=np.intp)
+    Xv = rng.standard_normal((24, 2))
+    yv = rng.integers(0, 3, size=24, dtype=np.intp)
+    Wt, bt = init_softmax_params(3, 2, rng=rng)
+    tr_h, va_h = train(
+        Xt,
+        yt,
+        Xv,
+        yv,
+        Wt,
+        bt,
+        l2_lambda=0.0,
+        learning_rate=0.05,
+        batch_size=64,
+        epochs=3,
+        rng=rng,
+    )
+    assert len(tr_h) == len(va_h) == 3
+    assert Wt.shape == (3, 2) and bt.shape == (3,)
