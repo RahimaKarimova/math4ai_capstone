@@ -39,7 +39,7 @@ except ImportError:
     import softmax_model as sm
     from neural_network import OneHiddenLayerNN
     from metrics import accuracy, mean_cross_entropy
-from plotting import plot_decision_boundary, plot_learning_curves
+    from plotting import plot_decision_boundary, plot_learning_curves
 
 #
 # Output directories
@@ -213,7 +213,7 @@ def story_gaussian():
     results_records.append(("gaussian", "nn_width32_sgd", float(acc_nn), float(ce_nn)))
 
     # Decision boundary plots
-    fig, axes = plt.subplots(1, 3, figsize=(12, 4))
+    fig, axes = plt.subplots(1, 2, figsize=(10, 4))
     # Softmax boundary
     pred_fn_softmax = lambda X: np.argmax(sm.predict_proba(X, W_s, b_s), axis=1)
     plot_decision_boundary(
@@ -224,8 +224,6 @@ def story_gaussian():
     plot_decision_boundary(
         pred_fn_nn, X_train, y_train, axes[1], title="Gaussian: NN (width 32)"
     )
-    # Combined overlay figure: show both boundaries side by side
-    axes[2].axis("off")
     fig.suptitle("Gaussian comparison (softmax vs. NN)")
     fig.tight_layout()
     fig.savefig(FIG_DIR / "gaussian_comparison.png")
@@ -272,7 +270,7 @@ def story_moons():
     results_records.append(("moons", "nn_width32_sgd", float(acc_nn), float(ce_nn)))
 
     # Decision boundary plots
-    fig, axes = plt.subplots(1, 3, figsize=(12, 4))
+    fig, axes = plt.subplots(1, 2, figsize=(10, 4))
     pred_fn_softmax = lambda X: np.argmax(sm.predict_proba(X, W_s, b_s), axis=1)
     plot_decision_boundary(
         pred_fn_softmax, X_train, y_train, axes[0], title="Moons: softmax"
@@ -281,7 +279,6 @@ def story_moons():
     plot_decision_boundary(
         pred_fn_nn, X_train, y_train, axes[1], title="Moons: NN (width 32)"
     )
-    axes[2].axis("off")
     fig.suptitle("Moons comparison (softmax vs. NN)")
     fig.tight_layout()
     fig.savefig(FIG_DIR / "moons_comparison.png")
