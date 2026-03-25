@@ -1,10 +1,12 @@
-"""Multiclass softmax regression: init, softmax, loss, vectorized forward (Stories 3.1–3.4)."""
+"""Multiclass softmax regression: init through gradients (Stories 3.1–3.5)."""
 
 from __future__ import annotations
 
-from typing import Optional, Tuple
+from typing import Dict, Optional, Tuple
 
 import numpy as np
+
+from metrics import one_hot
 
 
 def init_softmax_params(
@@ -161,6 +163,51 @@ def predict_proba(X: np.ndarray, W: np.ndarray, b: np.ndarray) -> np.ndarray:
     return P.reshape(-1) if single else P
 
 
+def compute_gradients(
+    X: np.ndarray,
+    y: np.ndarray,
+    W: np.ndarray,
+    b: np.ndarray,
+    l2_lambda: float = 0.0,
+) -> Dict[str, np.ndarray]:
+    """
+    Gradients of mean cross-entropy + ``(λ/2)||W||_F^2`` w.r.t. ``W`` and ``b``.
+
+    With logits ``S = X W^T + \\mathbf{1} b^T``, probabilities ``P = \\mathrm{softmax}(S)``
+    (row-wise), and one-hot targets ``Y`` from :func:`metrics.one_hot`:
+
+    - ``∂L/∂S = (P - Y) / n``
+    - ``∂L/∂W = (∂L/∂S)^T X + λ W``
+    - ``∂L/∂b = (∂L/∂S)^T \\mathbf{1}``
+
+    The L2 term matches :func:`l2_weight_penalty` (derivative ``λ W``, not ``2λ W``).
+    """
+    Xm = np.asarray(X, dtype=np.float64)
+    if Xm.ndim == 1:
+        Xm = Xm.reshape(1, -1)
+    ym = np.asarray(y, dtype=np.intp).ravel()
+    Wm = np.asarray(W, dtype=np.float64)
+    bm = np.asarray(b, dtype=np.float64)
+
+    n, d = Xm.shape
+    k, d_w = Wm.shape
+    if ym.shape[0] != n:
+        raise ValueError("X and y must have the same number of rows / samples.")
+    if d != d_w:
+        raise ValueError(f"X has {d} features but W has {d_w} columns.")
+    if bm.shape != (k,):
+        raise ValueError(f"Expected b of shape ({k},), got {bm.shape}.")
+
+    S = Xm @ Wm.T + bm
+    P = stable_softmax(S)
+    Y = one_hot(ym, k)
+
+    dL_dS = (P - Y) / float(n)
+    dW = dL_dS.T @ Xm + float(l2_lambda) * Wm
+    db = dL_dS.T @ np.ones(n, dtype=np.float64)
+    return {"W": dW, "b": db}
+
+
 if __name__ == "__main__":
     # Section 3.6 sanity check (Story 3.2 action item)
     example = np.array([1.2, 0.2, -0.4], dtype=np.float64)
@@ -188,3 +235,15 @@ if __name__ == "__main__":
     assert np.allclose(P_batch[0], p)
     P_one = predict_proba(example, W_i, b_z)
     assert P_one.shape == (3,) and np.allclose(P_one, p)
+
+    # Story 3.5: gradients via one-hot Y from metrics.py
+    rng = np.random.default_rng(0)
+    Xg = rng.standard_normal((4, 2))
+    Wg = rng.standard_normal((3, 2)) * 0.1
+    bg = rng.standard_normal(3) * 0.1
+    yg = np.array([0, 1, 2, 1], dtype=np.intp)
+    g0 = compute_gradients(Xg, yg, Wg, bg, l2_lambda=0.0)
+    assert g0["W"].shape == Wg.shape and g0["b"].shape == bg.shape
+    gl2 = compute_gradients(Xg, yg, Wg, bg, l2_lambda=0.5)
+    assert np.allclose(gl2["W"], g0["W"] + 0.5 * Wg)
+    assert np.allclose(gl2["b"], g0["b"])
