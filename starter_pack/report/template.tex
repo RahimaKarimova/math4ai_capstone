@@ -26,7 +26,77 @@ State the central question, the models compared, the main experimental evidence,
 Frame the capstone question and explain why comparing a linear model to a one-hidden-layer neural network is scientifically meaningful.
 
 \section{Background and Mathematical Setup}
-Define the AI concepts used in the project and summarize the required mathematical setup. Explain why softmax regression is a probabilistic model, why cross-entropy is negative log-likelihood, and describe the one-hidden-layer model structurally without pre-answering the main interpretive questions.
+This section summarizes the mathematical setup used throughout the report.
+
+\subsection{Backpropagation Concept (No Equations)}
+Backpropagation is an efficient bookkeeping method for the chain rule. In the forward pass, the model computes intermediate quantities in sequence: hidden pre-activations, hidden activations, output scores, probabilities, and loss. In the backward pass, sensitivity to the loss is propagated in reverse through the same computation graph. Each local derivative is simple; the full parameter gradients are obtained by repeatedly applying the chain rule.
+
+The key practical point is efficiency. Reverse-mode differentiation computes gradients for all parameters with cost on the same order as one forward pass (up to a small constant factor), which is why deep models are trainable in practice. Conceptually, backprop answers: if the loss changes a little, which parameters are responsible, in what direction, and by how much?
+
+\subsection{NLL Derivation for Softmax Cross-Entropy}
+For one sample $(x_i,y_i)$ and class scores $s_i \in \mathbb{R}^k$, define
+\[
+p_{ij} = \frac{e^{s_{ij}}}{\sum_{\ell=1}^k e^{s_{i\ell}}}
+      = \mathbb{P}(Y=j \mid X=x_i; \theta).
+\]
+If labels are categorical, the likelihood for one sample is
+\[
+\mathcal{L}_i(\theta) = p_{i,y_i}.
+\]
+Hence the dataset log-likelihood is
+\[
+\log \mathcal{L}(\theta)=\sum_{i=1}^n \log p_{i,y_i}.
+\]
+Maximizing average log-likelihood is equivalent to minimizing
+\[
+-\frac{1}{n}\sum_{i=1}^n \log p_{i,y_i},
+\]
+which is exactly the mean cross-entropy loss. Therefore, minimizing softmax cross-entropy is the same optimization objective as maximum likelihood estimation for a conditional categorical model.
+
+\subsection{Complete Gradient Derivation (One-Hidden-Layer NN)}
+Let batch input be $X\in\mathbb{R}^{n\times d}$ and one-hot labels $Y\in\mathbb{R}^{n\times k}$. With one hidden layer:
+\[
+Z_1 = XW_1^\top + \mathbf{1}b_1^\top,\quad
+H = \tanh(Z_1),\quad
+S = HW_2^\top + \mathbf{1}b_2^\top,\quad
+P=\mathrm{softmax}_{\text{row}}(S).
+\]
+Use mean cross-entropy plus L2 on weights only:
+\[
+J = -\frac{1}{n}\sum_{i=1}^n\sum_{j=1}^k Y_{ij}\log P_{ij}
+    + \frac{\lambda}{2}\left(\|W_1\|_F^2+\|W_2\|_F^2\right).
+\]
+For the output layer:
+\[
+\frac{\partial J}{\partial S}=\frac{1}{n}(P-Y),
+\quad
+\frac{\partial J}{\partial W_2}
+=\left(\frac{\partial J}{\partial S}\right)^\top H + \lambda W_2,
+\quad
+\frac{\partial J}{\partial b_2}
+=\left(\frac{\partial J}{\partial S}\right)^\top\mathbf{1}.
+\]
+Propagate to hidden pre-activations:
+\[
+\frac{\partial J}{\partial Z_1}
+=\left(\frac{\partial J}{\partial S}\right)W_2
+\odot \left(1-H\odot H\right),
+\]
+where $1-H\odot H$ is the elementwise derivative of $\tanh$.
+Then
+\[
+\frac{\partial J}{\partial W_1}
+=\left(\frac{\partial J}{\partial Z_1}\right)^\top X + \lambda W_1,
+\quad
+\frac{\partial J}{\partial b_1}
+=\left(\frac{\partial J}{\partial Z_1}\right)^\top\mathbf{1}.
+\]
+L2 is applied to weights only; there is no regularization term on $b_1,b_2$.
+
+\subsection{Geometric Interpretation (Gaussian vs Moons)}
+In the linear Gaussian task, classes are generated from roughly affine-separable structure in input space. A softmax linear classifier creates hyperplane decision boundaries, which is well matched to this geometry. Therefore, a linear baseline is expected to perform strongly and often does not require additional representation depth to capture the dominant class structure.
+
+In the moons task, classes lie on interleaving curved manifolds. A single affine boundary cannot separate the classes cleanly. The hidden layer introduces a nonlinear feature map (through $\tanh$), which can bend and re-embed the input geometry before the final linear readout. This model pairing is therefore meaningful: softmax tests whether linear structure is sufficient, while the one-hidden-layer network tests whether nonlinear representation is needed for the observed geometry.
 
 \section{Methods}
 Describe the datasets, preprocessing, softmax regression, neural network, training protocol, optimizer choices, and evaluation metrics. Make the digits protocol explicit and state exactly how validation and test data were used.
