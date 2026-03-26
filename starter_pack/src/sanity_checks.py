@@ -13,6 +13,170 @@ from neural_network import OneHiddenLayerNN
 from optimizers import SGD
 
 
+def _entrywise_relative_error(analytical: np.ndarray, numerical: np.ndarray) -> np.ndarray:
+    """Entrywise relative error: |a - n| / max(1e-8, |a| + |n|)."""
+    a = np.asarray(analytical, dtype=np.float64)
+    n = np.asarray(numerical, dtype=np.float64)
+    denom = np.maximum(1e-8, np.abs(a) + np.abs(n))
+    return np.abs(a - n) / denom
+
+
+def _central_difference_gradient(
+    params: Dict[str, np.ndarray],
+    loss_fn,
+    eps: float = 1e-5,
+) -> Dict[str, np.ndarray]:
+    """
+    Numerical gradient via central differences for every parameter entry:
+    (L(theta + eps) - L(theta - eps)) / (2 * eps).
+    """
+    grads: Dict[str, np.ndarray] = {}
+    for name, arr in params.items():
+        g = np.zeros_like(arr, dtype=np.float64)
+        for idx in np.ndindex(arr.shape):
+            original = arr[idx]
+            arr[idx] = original + eps
+            loss_plus = loss_fn()
+            arr[idx] = original - eps
+            loss_minus = loss_fn()
+            arr[idx] = original
+            g[idx] = (loss_plus - loss_minus) / (2.0 * eps)
+        grads[name] = g
+    return grads
+
+
+def check_softmax_numerical_gradient(
+    rng: np.random.Generator,
+    *,
+    n_samples: int = 6,
+    input_dim: int = 4,
+    num_classes: int = 3,
+    l2_lambda: float = 0.02,
+    eps: float = 1e-5,
+    pass_threshold: float = 1e-4,
+    bug_threshold: float = 1e-3,
+) -> Dict[str, Any]:
+    """
+    Compare softmax analytical gradients to central-difference numerical gradients.
+
+    Pass: max relative error < 1e-4 and no entries > 1e-3.
+    """
+    X = rng.standard_normal((n_samples, input_dim))
+    y = rng.integers(0, num_classes, size=n_samples, dtype=np.intp)
+    W, b = sm.init_softmax_params(num_classes, input_dim, rng=rng)
+    params: Dict[str, np.ndarray] = {"W": W, "b": b}
+
+    def loss_fn() -> float:
+        logits = X @ W.T + b
+        return sm.softmax_loss(logits, y, W, l2_lambda=l2_lambda)
+
+    analytical = sm.compute_gradients(X, y, W, b, l2_lambda=l2_lambda)
+    numerical = _central_difference_gradient(params, loss_fn, eps=eps)
+
+    max_relative_error = 0.0
+    worst_param = ""
+    worst_index: Tuple[int, ...] = ()
+    entries_above_bug_threshold = 0
+
+    for name in ("W", "b"):
+        rel = _entrywise_relative_error(analytical[name], numerical[name])
+        local_max = float(np.max(rel))
+        local_idx_flat = int(np.argmax(rel))
+        if local_max > max_relative_error:
+            max_relative_error = local_max
+            worst_param = name
+            worst_index = tuple(int(i) for i in np.unravel_index(local_idx_flat, rel.shape))
+        entries_above_bug_threshold += int(np.count_nonzero(rel > bug_threshold))
+
+    status = (
+        "PASS"
+        if (max_relative_error < pass_threshold and entries_above_bug_threshold == 0)
+        else "FAIL"
+    )
+    return {
+        "status": status,
+        "eps": float(eps),
+        "pass_threshold": float(pass_threshold),
+        "bug_threshold": float(bug_threshold),
+        "max_relative_error": float(max_relative_error),
+        "worst_param": worst_param,
+        "worst_index": worst_index,
+        "entries_above_bug_threshold": int(entries_above_bug_threshold),
+    }
+
+
+def check_nn_numerical_gradient(
+    rng: np.random.Generator,
+    *,
+    n_samples: int = 6,
+    input_dim: int = 4,
+    num_classes: int = 3,
+    hidden_width: int = 5,
+    l2_lambda: float = 0.01,
+    eps: float = 1e-5,
+    pass_threshold: float = 1e-4,
+    bug_threshold: float = 1e-3,
+) -> Dict[str, Any]:
+    """
+    Compare one-hidden-layer NN analytical gradients to numerical gradients.
+
+    Pass: max relative error < 1e-4 and no entries > 1e-3.
+    """
+    X = rng.standard_normal((n_samples, input_dim))
+    y = rng.integers(0, num_classes, size=n_samples, dtype=np.intp)
+    model = OneHiddenLayerNN(
+        input_dim=input_dim,
+        num_classes=num_classes,
+        hidden_width=hidden_width,
+        seed=int(rng.integers(0, 2**31 - 1)),
+        l2_lambda=l2_lambda,
+    )
+
+    params: Dict[str, np.ndarray] = {
+        "W1": model.W1,
+        "b1": model.b1,
+        "W2": model.W2,
+        "b2": model.b2,
+    }
+
+    def loss_fn() -> float:
+        return model._cross_entropy_with_l2(X, y)
+
+    analytical = model.compute_gradients(X, y)
+    numerical = _central_difference_gradient(params, loss_fn, eps=eps)
+
+    max_relative_error = 0.0
+    worst_param = ""
+    worst_index: Tuple[int, ...] = ()
+    entries_above_bug_threshold = 0
+
+    for name in ("W1", "b1", "W2", "b2"):
+        rel = _entrywise_relative_error(analytical[name], numerical[name])
+        local_max = float(np.max(rel))
+        local_idx_flat = int(np.argmax(rel))
+        if local_max > max_relative_error:
+            max_relative_error = local_max
+            worst_param = name
+            worst_index = tuple(int(i) for i in np.unravel_index(local_idx_flat, rel.shape))
+        entries_above_bug_threshold += int(np.count_nonzero(rel > bug_threshold))
+
+    status = (
+        "PASS"
+        if (max_relative_error < pass_threshold and entries_above_bug_threshold == 0)
+        else "FAIL"
+    )
+    return {
+        "status": status,
+        "eps": float(eps),
+        "pass_threshold": float(pass_threshold),
+        "bug_threshold": float(bug_threshold),
+        "max_relative_error": float(max_relative_error),
+        "worst_param": worst_param,
+        "worst_index": worst_index,
+        "entries_above_bug_threshold": int(entries_above_bug_threshold),
+    }
+
+
 def _assert_finite_params_softmax(W: np.ndarray, b: np.ndarray) -> None:
     if not np.all(np.isfinite(W)) or not np.all(np.isfinite(b)):
         raise AssertionError("Softmax parameters contain NaN or Inf.")
@@ -270,6 +434,9 @@ class SanityReport:
 def run_all_checks(seed: int = 123) -> SanityReport:
     rng = np.random.default_rng(seed)
     report = SanityReport()
+
+    report.softmax["numerical_gradient"] = check_softmax_numerical_gradient(rng)
+    report.neural_network["numerical_gradient"] = check_nn_numerical_gradient(rng)
 
     st, loss = check_softmax_tiny_overfit(rng)
     report.softmax["tiny_overfit"] = {"status": st, "final_train_loss": loss}
