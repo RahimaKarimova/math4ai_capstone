@@ -1,0 +1,5 @@
+model,group,count,mean_predictive_entropy
+softmax,correct,346,0.481057940901382
+softmax,incorrect,22,1.3390813437769251
+nn,correct,345,0.1903613172084016
+nn,incorrect,23,0.979186383202546
