@@ -1,0 +1,7 @@
+dataset,model,test_accuracy,test_cross_entropy
+moons,nn_width2_sgd,0.85,0.2781259277888964
+moons,nn_width8_sgd,0.85,0.2712329174646735
+moons,nn_width32_sgd,0.85,0.269472815023238
+digits,nn_width32_sgd,0.9375,0.19293891715929537
+digits,nn_width32_momentum,0.9429347826086957,0.17581590842087735
+digits,nn_width32_adam,0.9565217391304348,0.16221088971416203
