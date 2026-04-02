@@ -1,9 +1,9 @@
-"""Training and forward-pass sanity checks for softmax and one-hidden-layer NN (Story 5.2)."""
+"""Training and forward-pass sanity checks for softmax and one-hidden-layer NN."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, Tuple
+from typing import Any, Dict, Iterator, Tuple
 
 import numpy as np
 
@@ -431,6 +431,54 @@ class SanityReport:
     neural_network: Dict[str, Any] = field(default_factory=dict)
 
 
+# Human-readable labels aligned with capstone §5.5 (gradient, loss trend, overfit, proba sums, finite params).
+_CHECK_LABELS: Dict[str, str] = {
+    "numerical_gradient": "Gradient sanity: analytical vs central-difference on a tiny batch",
+    "tiny_overfit": "Tiny-set overfit: train loss below threshold after fixed SGD steps",
+    "loss_decrease": "Loss decreases after several updates on a small linearly separable set",
+    "nan_inf_training": "Mini-batch training keeps parameters finite (no NaN/Inf)",
+    "predict_proba_row_sums": "Predicted class probabilities sum to 1 per row",
+}
+
+
+def iter_check_rows(report: SanityReport) -> Iterator[Tuple[str, str, str, Dict[str, Any]]]:
+    """Yield (model_title, check_key, status, detail_dict) for each check with a status."""
+    for model_title, block in (
+        ("Softmax regression", report.softmax),
+        ("One-hidden-layer NN", report.neural_network),
+    ):
+        for key, val in block.items():
+            if not isinstance(val, dict):
+                continue
+            st = val.get("status")
+            if st is None:
+                continue
+            yield model_title, key, str(st), val
+
+
+def print_check_results(report: SanityReport) -> None:
+    """Print which checks ran and PASS/FAIL; call before assert_all_pass so failures stay visible."""
+    print("Implementation sanity checks")
+    print("-" * 40)
+    current_model = ""
+    for model_title, key, status, detail in iter_check_rows(report):
+        if model_title != current_model:
+            current_model = model_title
+            print(f"\n{model_title}")
+        label = _CHECK_LABELS.get(key, key)
+        line = f"  [{status}] {label}"
+        if key == "numerical_gradient" and "max_relative_error" in detail:
+            line += f" (max rel. err. {detail['max_relative_error']:.2e})"
+        elif key == "tiny_overfit":
+            line += f" (final loss {detail.get('final_train_loss', float('nan')):.4f})"
+        elif key == "loss_decrease":
+            line += f" ({detail.get('loss_initial', 0):.4f} -> {detail.get('loss_final', 0):.4f})"
+        elif key == "predict_proba_row_sums" and "max_abs_error" in detail:
+            line += f" (max |sum-1| = {detail['max_abs_error']:.2e})"
+        print(line)
+    print("-" * 40)
+
+
 def run_all_checks(seed: int = 123) -> SanityReport:
     rng = np.random.default_rng(seed)
     report = SanityReport()
@@ -477,5 +525,6 @@ def assert_all_pass(report: SanityReport) -> None:
 
 if __name__ == "__main__":
     rep = run_all_checks()
+    print_check_results(rep)
     assert_all_pass(rep)
-    print("All Story 5.2 sanity checks passed.")
+    print("All listed sanity checks passed.")
