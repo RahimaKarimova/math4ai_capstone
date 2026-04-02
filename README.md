@@ -4,10 +4,10 @@
 
 | Name | Role |
 |------|------|
-| Aisel Mamedova | Softmax regression, core experiments |
-| Rəhimə Kərimova | Neural network, ablation experiments |
-| Şəmistan Hüseynov | Experiment orchestration and plots |
-| Gülnur Məmmədova | Report and presentation integration |
+| Aisel Mamedova | 
+| Rəhimə Kərimova | 
+| Şəmistan Hüseynov | 
+| Gülnur Məmmədova | 
 
 ## Project Overview
 
